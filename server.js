@@ -1,93 +1,68 @@
+require('dotenv').config();
 const express = require('express');
-const conectarDB = require('./db');
 const mongoose = require('mongoose');
 const cors = require('cors');
-require('dotenv').config();
-
 const app = express();
-app.use(cors());
+
+// ===== CONFIGURACIÓN CORS =====
+app.use(cors({
+  origin: ['http://localhost:3000', 'http://127.0.0.1:3000'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
 app.use(express.json());
 
-conectarDB();
+// ===== CONEXIÓN A MONGODB =====
+mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/ciudadalerta')
+  .then(() => console.log('✅ Conectado a MongoDB'))
+  .catch(err => console.error('❌ Error conectando a MongoDB:', err));
 
-const authRoutes = require('./auth');
-app.use('/auth', authRoutes);
-
-// Modelo de Alerta
-const AlertaSchema = new mongoose.Schema({
-tipo: String,
-descripcion: String,
-sector: String,
-fecha: { type: Date, default: Date.now }
+// ===== ESQUEMA Y MODELO =====
+const alertaSchema = new mongoose.Schema({
+  tipo: String,
+  descripcion: String,
+  sector: String,
+  fecha: { type: Date, default: Date.now }
 });
 
-const Alerta = mongoose.model('Alerta', AlertaSchema);
+const Alerta = mongoose.model('Alerta', alertaSchema);
 
-// Modelo de Incidencia
-const IncidenciaSchema = new mongoose.Schema({
-tipo: String,
-descripcion: String,
-ubicacion: String,
-fecha: { type: Date, default: Date.now }
-});
-
-const Incidencia = mongoose.model('Incidencia', IncidenciaSchema);
-
-// Ruta principal
-app.get('/', (req, res) => {
-res.json({
-    plataforma: "CiudadAlerta",
-    descripcion: "Plataforma digital de alertas y reportes ciudadanos",
-    estado: "Activo",
-    version: "2.0"
-});
-});
-
-// Consultar todas las alertas
+// ===== RUTAS =====
+// Obtener todas las alertas
 app.get('/alertas', async (req, res) => {
-const alertas = await Alerta.find();
-res.json(alertas);
+  try {
+    const alertas = await Alerta.find().sort({ fecha: -1 });
+    res.json(alertas);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
-// Consultar alerta por id
-app.get('/alertas/:id', async (req, res) => {
-const alerta = await Alerta.findById(req.params.id);
-if (alerta) {
-    res.json(alerta);
-} else {
-    res.json({ mensaje: "Alerta no encontrada" });
-}
-});
-
-// Registrar nueva alerta
+// Crear una alerta
 app.post('/alertas', async (req, res) => {
-const alerta = new Alerta({
-    tipo: req.body.tipo,
-    descripcion: req.body.descripcion,
-    sector: req.body.sector
-});
-await alerta.save();
-res.json({ mensaje: "Alerta registrada exitosamente", alerta });
+  try {
+    const { tipo, descripcion, sector } = req.body;
+    const nuevaAlerta = new Alerta({ tipo, descripcion, sector });
+    await nuevaAlerta.save();
+    res.status(201).json(nuevaAlerta);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
 });
 
-// Eliminar alerta
+// Eliminar una alerta
 app.delete('/alertas/:id', async (req, res) => {
-await Alerta.findByIdAndDelete(req.params.id);
-res.json({ mensaje: "Alerta eliminada exitosamente" });
+  try {
+    await Alerta.findByIdAndDelete(req.params.id);
+    res.json({ message: 'Alerta eliminada' });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
 });
 
-// Reportar incidencia
-app.post('/incidencia', async (req, res) => {
-const incidencia = new Incidencia({
-    tipo: req.body.tipo,
-    descripcion: req.body.descripcion,
-    ubicacion: req.body.ubicacion
-});
-await incidencia.save();
-res.json({ mensaje: "Incidencia reportada exitosamente", incidencia });
-});
-
+// ===== INICIAR SERVIDOR =====
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-console.log(`CiudadAlerta ejecutándose en puerto ${PORT}`);
+  console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);
 });
