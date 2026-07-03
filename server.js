@@ -8,6 +8,9 @@ app.use(express.json());
 
 conectarDB();
 
+const authRoutes = require('./auth');
+app.use('/auth', authRoutes);
+
 // Modelo de Alerta
 const AlertaSchema = new mongoose.Schema({
 tipo: String,
