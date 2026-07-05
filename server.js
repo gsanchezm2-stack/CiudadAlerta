@@ -15,8 +15,8 @@ app.use(express.json());
 
 // ===== CONEXIÓN A MONGODB =====
 mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/ciudadalerta')
-  .then(() => console.log('✅ Conectado a MongoDB'))
-  .catch(err => console.error('❌ Error conectando a MongoDB:', err));
+  .then(() => console.log(' Conectado a MongoDB'))
+  .catch(err => console.error(' Error conectando a MongoDB:', err));
 
 // ===== ESQUEMA Y MODELO =====
 const alertaSchema = new mongoose.Schema({
@@ -64,5 +64,5 @@ app.delete('/alertas/:id', async (req, res) => {
 // ===== INICIAR SERVIDOR =====
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);
+  console.log(` Servidor corriendo en http://localhost:${PORT}`);
 });
