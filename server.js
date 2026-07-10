@@ -2,21 +2,28 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const path = require('path');
 const app = express();
 
 // ===== CONFIGURACIÓN CORS =====
+const corsOrigins = process.env.CORS_ORIGINS
+  ? process.env.CORS_ORIGINS.split(',')
+  : ['http://localhost:3000', 'http://127.0.0.1:3000'];
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://127.0.0.1:3000'],
+  origin: corsOrigins,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 app.use(express.json());
 
+// ===== SERVIER FRONTEND (PRODUCCIÓN) =====
+app.use(express.static(path.join(__dirname, '..', 'ciudadalerta-web', 'build')));
+
 // ===== CONEXIÓN A MONGODB =====
 mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/ciudadalerta')
-  .then(() => console.log(' Conectado a MongoDB'))
-  .catch(err => console.error(' Error conectando a MongoDB:', err));
+  .then(() => console.log('✅ Conectado a MongoDB'))
+  .catch(err => console.error('❌ Error conectando a MongoDB:', err));
 
 // ===== ESQUEMA Y MODELO =====
 const alertaSchema = new mongoose.Schema({
@@ -28,9 +35,9 @@ const alertaSchema = new mongoose.Schema({
 
 const Alerta = mongoose.model('Alerta', alertaSchema);
 
-// ===== RUTAS =====
+// ===== RUTAS CON /api =====
 // Obtener todas las alertas
-app.get('/alertas', async (req, res) => {
+app.get('/api/alertas', async (req, res) => {
   try {
     const alertas = await Alerta.find().sort({ fecha: -1 });
     res.json(alertas);
@@ -40,7 +47,7 @@ app.get('/alertas', async (req, res) => {
 });
 
 // Crear una alerta
-app.post('/alertas', async (req, res) => {
+app.post('/api/alertas', async (req, res) => {
   try {
     const { tipo, descripcion, sector } = req.body;
     const nuevaAlerta = new Alerta({ tipo, descripcion, sector });
@@ -52,7 +59,7 @@ app.post('/alertas', async (req, res) => {
 });
 
 // Eliminar una alerta
-app.delete('/alertas/:id', async (req, res) => {
+app.delete('/api/alertas/:id', async (req, res) => {
   try {
     await Alerta.findByIdAndDelete(req.params.id);
     res.json({ message: 'Alerta eliminada' });
@@ -61,8 +68,19 @@ app.delete('/alertas/:id', async (req, res) => {
   }
 });
 
+// ===== RUTA DE PRUEBA =====
+app.get('/api/test', (req, res) => {
+  res.json({ message: 'Servidor funcionando correctamente' });
+});
+
+// ===== SERVIER SPA (FALLBACK) =====
+app.use((req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'ciudadalerta-web', 'build', 'index.html'));
+});
+
 // ===== INICIAR SERVIDOR =====
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(` Servidor corriendo en http://localhost:${PORT}`);
+  console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);
+  console.log(`📡 Endpoint: http://localhost:${PORT}/api/alertas`);
 });
