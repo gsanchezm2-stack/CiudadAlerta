@@ -8,7 +8,7 @@ const app = express();
 // ===== CONFIGURACIÓN CORS =====
 const corsOrigins = process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(',')
-  : ['http://localhost:3000', 'http://127.0.0.1:3000'];
+  : ['http://localhost:3000', 'http://127.0.0.1:3000', 'https://*.ngrok-free.app', 'https://*.ngrok-free.dev'];
 app.use(cors({
   origin: corsOrigins,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -80,7 +80,8 @@ app.use((req, res) => {
 
 // ===== INICIAR SERVIDOR =====
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);
-  console.log(`📡 Endpoint: http://localhost:${PORT}/api/alertas`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Servidor corriendo en http://0.0.0.0:${PORT}`);
+  console.log(`📡 Endpoint: http://0.0.0.0:${PORT}/api/alertas`);
+  console.log(`🌐 Accesible desde otros dispositivos en la red`);
 });
