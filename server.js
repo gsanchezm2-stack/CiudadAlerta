@@ -129,7 +129,6 @@ const alertaLimiter = rateLimit({
 });
 app.use('/api/alertas', alertaLimiter);
 
-app.use(express.static(path.join(__dirname, '..', 'ciudadalerta-web', 'build')));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 const swaggerOptions = {
@@ -147,7 +146,7 @@ const swaggerOptions = {
       }
     }
   },
-  apis: []
+  apis: [path.join(__dirname, 'routes', '*.js')]
 };
 const swaggerSpec = swaggerJsdoc(swaggerOptions);
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
@@ -159,7 +158,15 @@ app.use('/api/usuarios', usuariosRoutes);
 app.use('/api/health', healthRoutes);
 
 app.use((req, res) => {
-  res.sendFile(path.join(__dirname, '..', 'ciudadalerta-web', 'build', 'index.html'));
+  if (req.path.startsWith('/api/')) {
+    return res.status(404).json({ error: 'Endpoint no encontrado' });
+  }
+  res.status(200).json({
+    mensaje: 'CiudadAlerta API',
+    version: '1.0.0',
+    docs: '/api/docs',
+    health: '/api/health'
+  });
 });
 
 app.use(errorHandler);
