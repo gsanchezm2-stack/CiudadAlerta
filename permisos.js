@@ -3,14 +3,21 @@ const PERMISOS = {
     'alertas:crear',
     'alertas:ver',
     'alertas:ver_stats',
-    'alertas:cerrar_propia'
+    'alertas:cerrar_propia',
+    'comentarios:crear',
+    'comentarios:ver',
+    'comentarios:eliminar_propio'
   ],
   autoridad: [
     'alertas:crear',
     'alertas:ver',
     'alertas:ver_stats',
     'alertas:cambiar_estado',
-    'alertas:eliminar'
+    'alertas:eliminar',
+    'comentarios:crear',
+    'comentarios:ver',
+    'comentarios:eliminar_propio',
+    'comentarios:eliminar'
   ],
   administrador: [
     'alertas:crear',
@@ -19,7 +26,11 @@ const PERMISOS = {
     'alertas:cambiar_estado',
     'alertas:eliminar',
     'usuarios:ver',
-    'usuarios:editar_rol'
+    'usuarios:editar_rol',
+    'comentarios:crear',
+    'comentarios:ver',
+    'comentarios:eliminar_propio',
+    'comentarios:eliminar'
   ]
 };
 

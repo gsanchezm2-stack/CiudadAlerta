@@ -1,28 +1,18 @@
-const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
-const Usuario = require('./usuario');
+const Usuario = require('../models/Usuario');
 
-const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET;
 
-router.post('/registro', async (req, res) => {
+exports.registro = async (req, res, next) => {
   try {
     const { nombre, email, password } = req.body;
-
-    if (!nombre || !email || !password) {
-      return res.status(400).json({ mensaje: 'Todos los campos son obligatorios' });
-    }
-
-    if (password.length < 8) {
-      return res.status(400).json({ mensaje: 'La contraseña debe tener al menos 8 caracteres' });
-    }
 
     const emailNormalizado = email.toLowerCase().trim();
     const usuarioExiste = await Usuario.findOne({ email: emailNormalizado });
     if (usuarioExiste) {
-      return res.status(409).json({ mensaje: 'El email ya está registrado' });
+      return res.status(409).json({ mensaje: 'El email ya esta registrado' });
     }
 
     const passwordEncriptada = await bcrypt.hash(password, 12);
@@ -45,26 +35,22 @@ router.post('/registro', async (req, res) => {
       }
     });
   } catch (error) {
-    res.status(500).json({ mensaje: 'Error al registrar usuario' });
+    next(error);
   }
-});
+};
 
-router.post('/login', async (req, res) => {
+exports.login = async (req, res, next) => {
   try {
     const { email, password } = req.body;
 
-    if (!email || !password) {
-      return res.status(400).json({ mensaje: 'Email y contraseña son obligatorios' });
-    }
-
     const usuario = await Usuario.findOne({ email: email.toLowerCase().trim() });
     if (!usuario) {
-      return res.status(401).json({ mensaje: 'Credenciales inválidas' });
+      return res.status(401).json({ mensaje: 'Credenciales invalidas' });
     }
 
     const passwordValida = await bcrypt.compare(password, usuario.password);
     if (!passwordValida) {
-      return res.status(401).json({ mensaje: 'Credenciales inválidas' });
+      return res.status(401).json({ mensaje: 'Credenciales invalidas' });
     }
 
     const token = jwt.sign(
@@ -84,16 +70,13 @@ router.post('/login', async (req, res) => {
       }
     });
   } catch (error) {
-    res.status(500).json({ mensaje: 'Error al iniciar sesión' });
+    next(error);
   }
-});
+};
 
-router.post('/forgot-password', async (req, res) => {
+exports.forgotPassword = async (req, res, next) => {
   try {
     const { email } = req.body;
-    if (!email) {
-      return res.status(400).json({ mensaje: 'Email es obligatorio' });
-    }
 
     const usuario = await Usuario.findOne({ email: email.toLowerCase().trim() });
     if (!usuario) {
@@ -111,21 +94,13 @@ router.post('/forgot-password', async (req, res) => {
       mensaje: 'Si el email existe, recibiras un enlace de recuperacion'
     });
   } catch (error) {
-    res.status(500).json({ mensaje: 'Error al procesar solicitud' });
+    next(error);
   }
-});
+};
 
-router.post('/reset-password', async (req, res) => {
+exports.resetPassword = async (req, res, next) => {
   try {
     const { token, password } = req.body;
-
-    if (!token || !password) {
-      return res.status(400).json({ mensaje: 'Token y password son obligatorios' });
-    }
-
-    if (password.length < 8) {
-      return res.status(400).json({ mensaje: 'La contraseña debe tener al menos 8 caracteres' });
-    }
 
     const usuario = await Usuario.findOne({
       resetToken: token,
@@ -143,8 +118,18 @@ router.post('/reset-password', async (req, res) => {
 
     res.json({ mensaje: 'Contrasena actualizada exitosamente' });
   } catch (error) {
-    res.status(500).json({ mensaje: 'Error al restablecer contrasena' });
+    next(error);
   }
-});
+};
 
-module.exports = router;
+exports.me = async (req, res, next) => {
+  try {
+    const usuario = await Usuario.findById(req.usuario.id).select('nombre email rol').lean();
+    if (!usuario) {
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
+    res.json(usuario);
+  } catch (error) {
+    next(error);
+  }
+};

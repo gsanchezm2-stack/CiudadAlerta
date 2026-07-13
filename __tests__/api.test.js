@@ -11,6 +11,7 @@ let mongoServer;
 let app;
 let Usuario;
 let Alerta;
+let Comentario;
 
 beforeAll(async () => {
   process.env.JWT_SECRET = 'test_secret_123';
@@ -39,6 +40,13 @@ beforeAll(async () => {
     adjuntos: [{ url: String, nombre: String }],
     eliminado: { type: Boolean, default: false }
   }));
+
+  Comentario = mongoose.model('Comentario', new mongoose.Schema({
+    texto: { type: String, required: true, trim: true, maxlength: 500 },
+    autor: { type: mongoose.Schema.Types.ObjectId, ref: 'Usuario', required: true },
+    alerta: { type: mongoose.Schema.Types.ObjectId, ref: 'Alerta', required: true },
+    fecha: { type: Date, default: Date.now }
+  }, { timestamps: true }));
 
   const { verificarToken, verificarPermiso, verificarCambioEstado } = require('../middleware/auth');
   const { PERMISOS } = require('../permisos');
@@ -124,6 +132,59 @@ beforeAll(async () => {
   app.get('/api/health', async (req, res) => {
     const checks = { status: 'ok', uptime: Math.floor(process.uptime()), timestamp: new Date().toISOString() };
     res.json(checks);
+  });
+
+  app.get('/api/alertas/export', verificarToken, verificarPermiso('alertas:ver'), async (req, res) => {
+    const alertas = await Alerta.find({ eliminado: { $ne: true } }).sort({ fecha: -1 }).populate('autor', 'nombre email').lean();
+    const header = 'ID,Tipo,Descripcion,Sector,Estado,Autor,Fecha\n';
+    const rows = alertas.map(a => {
+      const fecha = new Date(a.fecha).toISOString();
+      const desc = `"${(a.descripcion || '').replace(/"/g, '""')}"`;
+      const autor = a.autor?.nombre || 'Anonimo';
+      return `${a._id},${a.tipo},${desc},${a.sector},${a.estado},${autor},${fecha}`;
+    }).join('\n');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename=ciudadalerta_reportes.csv');
+    res.send('\uFEFF' + header + rows);
+  });
+
+  app.post('/api/alertas/:id/comentarios', verificarToken, verificarPermiso('comentarios:crear'), async (req, res) => {
+    try {
+      const { texto } = req.body;
+      if (!texto || !texto.trim()) {
+        return res.status(400).json({ error: 'El comentario no puede estar vacio' });
+      }
+      const alerta = await Alerta.findOne({ _id: req.params.id, eliminado: { $ne: true } });
+      if (!alerta) return res.status(404).json({ error: 'Alerta no encontrada' });
+      const comentario = new Comentario({ texto: texto.trim().slice(0, 500), autor: req.usuario.id, alerta: req.params.id });
+      await comentario.save();
+      const poblado = await Comentario.findById(comentario._id).populate('autor', 'nombre rol').lean();
+      res.status(201).json(poblado);
+    } catch (error) {
+      res.status(400).json({ error: 'Error al crear comentario' });
+    }
+  });
+
+  app.get('/api/alertas/:id/comentarios', verificarToken, verificarPermiso('comentarios:ver'), async (req, res) => {
+    try {
+      const comentarios = await Comentario.find({ alerta: req.params.id }).populate('autor', 'nombre rol').sort({ fecha: -1 }).lean();
+      res.json(comentarios);
+    } catch (error) {
+      res.status(400).json({ error: 'Error al obtener comentarios' });
+    }
+  });
+
+  app.post('/api/auth/forgot-password', async (req, res) => {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ mensaje: 'Email es obligatorio' });
+    const crypto = require('crypto');
+    const usuario = await Usuario.findOne({ email: email.toLowerCase().trim() });
+    if (!usuario) return res.json({ mensaje: 'Si el email existe, recibiras un enlace' });
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    usuario.resetToken = resetToken;
+    usuario.resetTokenExpiry = new Date(Date.now() + 3600000);
+    await usuario.save();
+    res.json({ mensaje: 'Token enviado', resetToken });
   });
 });
 
@@ -298,6 +359,72 @@ describe('CiudadAlerta API', () => {
 
       const check = await Alerta.findById(a._id);
       expect(check.eliminado).toBe(false);
+    });
+  });
+
+  describe('POST /api/alertas/:id/comentarios', () => {
+    let alertaForComments;
+
+    beforeAll(async () => {
+      const a = await Alerta.create({ tipo: 'Seguridad', descripcion: 'Comment test alert here', sector: 'Test', autor: ciudadanoUser._id });
+      alertaForComments = a;
+    });
+
+    it('creates a comment', async () => {
+      const res = await request(app)
+        .post(`/api/alertas/${alertaForComments._id}/comentarios`)
+        .set('Authorization', `Bearer ${ciudadanoToken}`)
+        .send({ texto: 'Este es un comentario de prueba' });
+      expect(res.status).toBe(201);
+      expect(res.body.texto).toBe('Este es un comentario de prueba');
+    });
+
+    it('rejects empty comment', async () => {
+      const res = await request(app)
+        .post(`/api/alertas/${alertaForComments._id}/comentarios`)
+        .set('Authorization', `Bearer ${ciudadanoToken}`)
+        .send({ texto: '' });
+      expect(res.status).toBe(400);
+    });
+
+    it('gets comments for an alert', async () => {
+      const res = await request(app)
+        .get(`/api/alertas/${alertaForComments._id}/comentarios`)
+        .set('Authorization', `Bearer ${ciudadanoToken}`);
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body)).toBe(true);
+    });
+  });
+
+  describe('GET /api/alertas/export', () => {
+    it('exports CSV', async () => {
+      const res = await request(app)
+        .get('/api/alertas/export')
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toContain('text/csv');
+    });
+
+    it('rejects export without token', async () => {
+      const res = await request(app).get('/api/alertas/export');
+      expect(res.status).toBe(401);
+    });
+  });
+
+  describe('POST /api/auth/forgot-password', () => {
+    it('sends reset token', async () => {
+      const res = await request(app)
+        .post('/api/auth/forgot-password')
+        .send({ email: 'admin@test.com' });
+      expect(res.status).toBe(200);
+      expect(res.body.resetToken).toBeDefined();
+    });
+
+    it('returns success even for non-existent email', async () => {
+      const res = await request(app)
+        .post('/api/auth/forgot-password')
+        .send({ email: 'nobody@test.com' });
+      expect(res.status).toBe(200);
     });
   });
 });
