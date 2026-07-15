@@ -141,4 +141,38 @@ router.post('/reset-password', resetPassword, controller.resetPassword);
  */
 router.get('/me', verificarToken, controller.me);
 
+/**
+ * @swagger
+ * /auth/me:
+ *   put:
+ *     tags: [Auth]
+ *     summary: Actualizar nombre y email del usuario autenticado
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               nombre:
+ *                 type: string
+ *                 minLength: 2
+ *                 maxLength: 100
+ *               email:
+ *                 type: string
+ *                 format: email
+ *     responses:
+ *       200:
+ *         description: Datos actualizados del usuario
+ *       400:
+ *         description: Error de validacion
+ *       401:
+ *         description: No autenticado
+ *       409:
+ *         description: Email ya en uso
+ */
+router.put('/me', verificarToken, controller.updateMe);
+
 module.exports = router;

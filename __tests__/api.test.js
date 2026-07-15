@@ -29,6 +29,7 @@ beforeAll(async () => {
   const ESTADOS = ['pendiente', 'en_revision', 'resuelto'];
 
   Alerta = mongoose.model('Alerta', new mongoose.Schema({
+    titulo: { type: String, required: true, trim: true, maxlength: 100, minlength: 5 },
     tipo: { type: String, required: true, enum: TIPOS },
     descripcion: { type: String, required: true, trim: true, maxlength: 500, minlength: 10 },
     sector: { type: String, required: true, trim: true },
@@ -49,19 +50,29 @@ beforeAll(async () => {
   }, { timestamps: true }));
 
   const { verificarToken, verificarPermiso, verificarCambioEstado } = require('../middleware/auth');
-  const { PERMISOS } = require('../permisos');
 
   app = express();
   app.use(express.json());
 
+  // --- GET /api/alertas (mirror of alertasController.listar) ---
   app.get('/api/alertas', verificarToken, verificarPermiso('alertas:ver'), async (req, res) => {
     try {
-      const { sector, tipo, estado, q, page = 1, limit = 20 } = req.query;
+      const { sector, tipo, estado, q, page = 1, limit = 20, fechaDesde, fechaHasta } = req.query;
       const filtro = { eliminado: { $ne: true } };
       if (sector) filtro.sector = { $regex: sector.trim(), $options: 'i' };
       if (tipo) filtro.tipo = { $regex: `^${tipo.trim()}$`, $options: 'i' };
       if (estado) filtro.estado = estado;
-      if (q) filtro.descripcion = { $regex: q.trim(), $options: 'i' };
+      if (q) {
+        filtro.$or = [
+          { titulo: { $regex: q.trim(), $options: 'i' } },
+          { descripcion: { $regex: q.trim(), $options: 'i' } }
+        ];
+      }
+      if (fechaDesde || fechaHasta) {
+        filtro.fecha = {};
+        if (fechaDesde) filtro.fecha.$gte = new Date(fechaDesde);
+        if (fechaHasta) filtro.fecha.$lte = new Date(fechaHasta);
+      }
 
       const pageNum = Math.max(1, parseInt(page) || 1);
       const limitNum = Math.min(Math.max(1, parseInt(limit) || 20), 100);
@@ -77,24 +88,37 @@ beforeAll(async () => {
     }
   });
 
+  // --- POST /api/alertas (mirror of alertasController.crear) ---
   app.post('/api/alertas', verificarToken, verificarPermiso('alertas:crear'), async (req, res) => {
     try {
-      const { tipo, descripcion, sector, lat, lng } = req.body;
-      if (!tipo || !descripcion || !sector) {
+      const { titulo, tipo, descripcion, sector, lat, lng } = req.body;
+      if (!titulo || !tipo || !descripcion || !sector) {
         return res.status(400).json({ error: 'Campos obligatorios' });
       }
+      const tipoNormalizado = tipo.charAt(0).toUpperCase() + tipo.slice(1).toLowerCase();
+      const tituloLimpio = titulo.trim();
+      if (tituloLimpio.length > 100) {
+        return res.status(400).json({ error: 'Titulo: maximo 100 caracteres' });
+      }
+
       const doc = {
-        tipo, descripcion: descripcion.trim(), sector: sector.trim(), autor: req.usuario.id
+        titulo: tituloLimpio,
+        tipo: tipoNormalizado,
+        descripcion: descripcion.trim().slice(0, 500),
+        sector: sector.trim().slice(0, 80),
+        autor: req.usuario.id
       };
       if (lat && lng) { doc.lat = parseFloat(lat); doc.lng = parseFloat(lng); }
       const nueva = new Alerta(doc);
       await nueva.save();
-      res.status(201).json(nueva);
+      const poblada = await Alerta.findById(nueva._id).populate('autor', 'nombre').lean();
+      res.status(201).json(poblada);
     } catch (error) {
       res.status(400).json({ error: 'Error al crear' });
     }
   });
 
+  // --- PATCH /api/alertas/:id/estado ---
   app.patch('/api/alertas/:id/estado', verificarToken, verificarCambioEstado(Alerta), async (req, res) => {
     try {
       const { estado } = req.body;
@@ -109,6 +133,7 @@ beforeAll(async () => {
     }
   });
 
+  // --- DELETE /api/alertas/:id ---
   app.delete('/api/alertas/:id', verificarToken, verificarPermiso('alertas:eliminar'), async (req, res) => {
     try {
       const resultado = await Alerta.findByIdAndUpdate(req.params.id, { eliminado: true }, { new: true });
@@ -119,6 +144,7 @@ beforeAll(async () => {
     }
   });
 
+  // --- PATCH /api/alertas/:id/restaurar ---
   app.patch('/api/alertas/:id/restaurar', verificarToken, verificarPermiso('alertas:eliminar'), async (req, res) => {
     try {
       const resultado = await Alerta.findByIdAndUpdate(req.params.id, { eliminado: false }, { new: true });
@@ -129,25 +155,37 @@ beforeAll(async () => {
     }
   });
 
+  // --- GET /api/health ---
   app.get('/api/health', async (req, res) => {
     const checks = { status: 'ok', uptime: Math.floor(process.uptime()), timestamp: new Date().toISOString() };
     res.json(checks);
   });
 
+  // --- GET /api/alertas/export (mirror of alertasController.exportar) ---
   app.get('/api/alertas/export', verificarToken, verificarPermiso('alertas:ver'), async (req, res) => {
-    const alertas = await Alerta.find({ eliminado: { $ne: true } }).sort({ fecha: -1 }).populate('autor', 'nombre email').lean();
-    const header = 'ID,Tipo,Descripcion,Sector,Estado,Autor,Fecha\n';
-    const rows = alertas.map(a => {
-      const fecha = new Date(a.fecha).toISOString();
-      const desc = `"${(a.descripcion || '').replace(/"/g, '""')}"`;
-      const autor = a.autor?.nombre || 'Anonimo';
-      return `${a._id},${a.tipo},${desc},${a.sector},${a.estado},${autor},${fecha}`;
-    }).join('\n');
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename=ciudadalerta_reportes.csv');
-    res.send('\uFEFF' + header + rows);
+    try {
+      const alertas = await Alerta.find({ eliminado: { $ne: true } })
+        .sort({ fecha: -1 })
+        .populate('autor', 'nombre email')
+        .lean();
+
+      const header = 'ID,Titulo,Tipo,Descripcion,Sector,Estado,Autor,Fecha,Lat,Lng\n';
+      const rows = alertas.map(a => {
+        const fecha = new Date(a.fecha).toISOString();
+        const titulo = `"${(a.titulo || '').replace(/"/g, '""')}"`;
+        const desc = `"${(a.descripcion || '').replace(/"/g, '""')}"`;
+        const autor = a.autor?.nombre || 'Anonimo';
+        return `${a._id},${titulo},${a.tipo},${desc},${a.sector},${a.estado},${autor},${fecha},${a.lat || ''},${a.lng || ''}`;
+      }).join('\n');
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename=ciudadalerta_reportes.csv');
+      res.send('\uFEFF' + header + rows);
+    } catch (error) {
+      res.status(500).json({ error: 'Error al exportar' });
+    }
   });
 
+  // --- POST /api/alertas/:id/comentarios ---
   app.post('/api/alertas/:id/comentarios', verificarToken, verificarPermiso('comentarios:crear'), async (req, res) => {
     try {
       const { texto } = req.body;
@@ -165,6 +203,7 @@ beforeAll(async () => {
     }
   });
 
+  // --- GET /api/alertas/:id/comentarios ---
   app.get('/api/alertas/:id/comentarios', verificarToken, verificarPermiso('comentarios:ver'), async (req, res) => {
     try {
       const comentarios = await Comentario.find({ alerta: req.params.id }).populate('autor', 'nombre rol').sort({ fecha: -1 }).lean();
@@ -174,6 +213,7 @@ beforeAll(async () => {
     }
   });
 
+  // --- POST /api/auth/forgot-password ---
   app.post('/api/auth/forgot-password', async (req, res) => {
     const { email } = req.body;
     if (!email) return res.status(400).json({ mensaje: 'Email es obligatorio' });
@@ -185,6 +225,50 @@ beforeAll(async () => {
     usuario.resetTokenExpiry = new Date(Date.now() + 3600000);
     await usuario.save();
     res.json({ mensaje: 'Token enviado', resetToken });
+  });
+
+  // --- GET /api/auth/me ---
+  app.get('/api/auth/me', verificarToken, async (req, res) => {
+    const usuario = await Usuario.findById(req.usuario.id).select('nombre email rol').lean();
+    if (!usuario) return res.status(404).json({ error: 'Usuario no encontrado' });
+    res.json(usuario);
+  });
+
+  // --- PUT /api/auth/me (mirror of authController.updateMe) ---
+  app.put('/api/auth/me', verificarToken, async (req, res) => {
+    try {
+      const { nombre, email } = req.body;
+      const updates = {};
+
+      if (nombre) {
+        const trimmed = nombre.trim();
+        if (trimmed.length < 2 || trimmed.length > 100) {
+          return res.status(400).json({ error: 'Nombre: minimo 2, maximo 100 caracteres' });
+        }
+        updates.nombre = trimmed;
+      }
+
+      if (email) {
+        const normalized = email.toLowerCase().trim();
+        const existing = await Usuario.findOne({ email: normalized, _id: { $ne: req.usuario.id } });
+        if (existing) {
+          return res.status(409).json({ error: 'El email ya esta en uso' });
+        }
+        updates.email = normalized;
+      }
+
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ error: 'No hay campos para actualizar' });
+      }
+
+      const usuario = await Usuario.findByIdAndUpdate(req.usuario.id, updates, { new: true, runValidators: true })
+        .select('nombre email rol')
+        .lean();
+
+      res.json(usuario);
+    } catch (error) {
+      res.status(400).json({ error: 'Error al actualizar' });
+    }
   });
 });
 
@@ -221,16 +305,17 @@ describe('CiudadAlerta API', () => {
       const res = await request(app)
         .post('/api/alertas')
         .set('Authorization', `Bearer ${ciudadanoToken}`)
-        .send({ tipo: 'Seguridad', descripcion: 'Robo en la esquina principal del sector norte', sector: 'Norte' });
+        .send({ titulo: 'Robo en zona norte', tipo: 'Seguridad', descripcion: 'Robo en la esquina principal del sector norte', sector: 'Norte' });
       expect(res.status).toBe(201);
       expect(res.body.tipo).toBe('Seguridad');
       expect(res.body.estado).toBe('pendiente');
+      expect(res.body.titulo).toBe('Robo en zona norte');
     });
 
     it('rejects without token', async () => {
       const res = await request(app)
         .post('/api/alertas')
-        .send({ tipo: 'Seguridad', descripcion: 'Test description long enough', sector: 'Test' });
+        .send({ titulo: 'Test', tipo: 'Seguridad', descripcion: 'Test description long enough', sector: 'Test' });
       expect(res.status).toBe(401);
     });
 
@@ -238,7 +323,7 @@ describe('CiudadAlerta API', () => {
       const res = await request(app)
         .post('/api/alertas')
         .set('Authorization', `Bearer ${ciudadanoToken}`)
-        .send({ tipo: 'Invalido', descripcion: 'Test description long enough', sector: 'Test' });
+        .send({ titulo: 'Invalid type test', tipo: 'Invalido', descripcion: 'Test description long enough', sector: 'Test' });
       expect(res.status).toBe(400);
     });
 
@@ -246,19 +331,71 @@ describe('CiudadAlerta API', () => {
       const res = await request(app)
         .post('/api/alertas')
         .set('Authorization', `Bearer ${ciudadanoToken}`)
-        .send({ tipo: 'Movilidad', descripcion: 'Bache grande en avenida principal', sector: 'Centro', lat: -34.6037, lng: -58.3816 });
+        .send({ titulo: 'Bache en avenida', tipo: 'Movilidad', descripcion: 'Bache grande en avenida principal', sector: 'Centro', lat: -34.6037, lng: -58.3816 });
       expect(res.status).toBe(201);
       expect(res.body.lat).toBe(-34.6037);
       expect(res.body.lng).toBe(-58.3816);
     });
+
+    it('rejects titulo shorter than 5 chars', async () => {
+      const res = await request(app)
+        .post('/api/alertas')
+        .set('Authorization', `Bearer ${ciudadanoToken}`)
+        .send({ titulo: 'Hi', tipo: 'Otro', descripcion: 'Valid description here for test', sector: 'Test' });
+      expect(res.status).toBe(400);
+    });
+
+    it('rejects titulo longer than 100 chars', async () => {
+      const res = await request(app)
+        .post('/api/alertas')
+        .set('Authorization', `Bearer ${ciudadanoToken}`)
+        .send({ titulo: 'A'.repeat(101), tipo: 'Otro', descripcion: 'Valid description here for test', sector: 'Test' });
+      expect(res.status).toBe(400);
+    });
+
+    it('accepts titulo at exactly 5 chars (boundary)', async () => {
+      const res = await request(app)
+        .post('/api/alertas')
+        .set('Authorization', `Bearer ${ciudadanoToken}`)
+        .send({ titulo: 'ABCDE', tipo: 'Otro', descripcion: 'Valid description here for test', sector: 'Test' });
+      expect(res.status).toBe(201);
+    });
+
+    it('accepts titulo at exactly 100 chars (boundary)', async () => {
+      const res = await request(app)
+        .post('/api/alertas')
+        .set('Authorization', `Bearer ${ciudadanoToken}`)
+        .send({ titulo: 'A'.repeat(100), tipo: 'Otro', descripcion: 'Valid description here for test', sector: 'Test' });
+      expect(res.status).toBe(201);
+    });
+
+    it('rejects missing titulo', async () => {
+      const res = await request(app)
+        .post('/api/alertas')
+        .set('Authorization', `Bearer ${ciudadanoToken}`)
+        .send({ tipo: 'Otro', descripcion: 'Valid description here for test', sector: 'Test' });
+      expect(res.status).toBe(400);
+    });
   });
 
   describe('GET /api/alertas', () => {
-    let alertaId;
+    let alertaTituloUnico;
 
     beforeAll(async () => {
-      const a = await Alerta.create({ tipo: 'Seguridad', descripcion: 'Test alert for listing', sector: 'TestSector', autor: ciudadanoUser._id });
-      alertaId = a._id;
+      alertaTituloUnico = await Alerta.create({
+        titulo: 'Alumbrado publico dañado en parque central',
+        tipo: 'Infraestructura',
+        descripcion: 'Several broken streetlights near the main park area',
+        sector: 'Centro',
+        autor: ciudadanoUser._id
+      });
+      await Alerta.create({
+        titulo: 'Test alert title',
+        tipo: 'Seguridad',
+        descripcion: 'Test alert for listing',
+        sector: 'TestSector',
+        autor: ciudadanoUser._id
+      });
     });
 
     it('returns paginated results', async () => {
@@ -271,12 +408,22 @@ describe('CiudadAlerta API', () => {
       expect(res.body.paginacion.total).toBeGreaterThanOrEqual(1);
     });
 
-    it('filters by search query', async () => {
+    it('filters by search query on descripcion', async () => {
       const res = await request(app)
         .get('/api/alertas?q=listing')
         .set('Authorization', `Bearer ${ciudadanoToken}`);
       expect(res.status).toBe(200);
       expect(res.body.alertas.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('filters by search query on titulo', async () => {
+      const res = await request(app)
+        .get('/api/alertas?q=alumbrado')
+        .set('Authorization', `Bearer ${ciudadanoToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.alertas.length).toBeGreaterThanOrEqual(1);
+      const found = res.body.alertas.some(a => a.titulo && a.titulo.toLowerCase().includes('alumbrado'));
+      expect(found).toBe(true);
     });
 
     it('filters by sector', async () => {
@@ -292,7 +439,7 @@ describe('CiudadAlerta API', () => {
     let alertaId;
 
     beforeAll(async () => {
-      const a = await Alerta.create({ tipo: 'Salud', descripcion: 'Test status change alert', sector: 'Test', autor: ciudadanoUser._id });
+      const a = await Alerta.create({ titulo: 'Test status change', tipo: 'Salud', descripcion: 'Test status change alert', sector: 'Test', autor: ciudadanoUser._id });
       alertaId = a._id;
     });
 
@@ -306,7 +453,7 @@ describe('CiudadAlerta API', () => {
     });
 
     it('ciudadano can close own alert', async () => {
-      const a = await Alerta.create({ tipo: 'Infraestructura', descripcion: 'Author close test', sector: 'Test', autor: ciudadanoUser._id });
+      const a = await Alerta.create({ titulo: 'Author close test', tipo: 'Infraestructura', descripcion: 'Author close test', sector: 'Test', autor: ciudadanoUser._id });
       const res = await request(app)
         .patch(`/api/alertas/${a._id}/estado`)
         .set('Authorization', `Bearer ${ciudadanoToken}`)
@@ -316,7 +463,7 @@ describe('CiudadAlerta API', () => {
     });
 
     it('ciudadano cannot change to en_revision', async () => {
-      const a = await Alerta.create({ tipo: 'Educacion', descripcion: 'Cannot change to review', sector: 'Test', autor: ciudadanoUser._id });
+      const a = await Alerta.create({ titulo: 'Cannot change status', tipo: 'Educacion', descripcion: 'Cannot change to review', sector: 'Test', autor: ciudadanoUser._id });
       const res = await request(app)
         .patch(`/api/alertas/${a._id}/estado`)
         .set('Authorization', `Bearer ${ciudadanoToken}`)
@@ -327,7 +474,7 @@ describe('CiudadAlerta API', () => {
 
   describe('DELETE /api/alertas (soft delete)', () => {
     it('soft deletes an alert', async () => {
-      const a = await Alerta.create({ tipo: 'Otro', descripcion: 'Soft delete test alert', sector: 'Test', autor: ciudadanoUser._id });
+      const a = await Alerta.create({ titulo: 'Soft delete test', tipo: 'Otro', descripcion: 'Soft delete test alert', sector: 'Test', autor: ciudadanoUser._id });
       const res = await request(app)
         .delete(`/api/alertas/${a._id}`)
         .set('Authorization', `Bearer ${adminToken}`);
@@ -338,7 +485,7 @@ describe('CiudadAlerta API', () => {
     });
 
     it('soft deleted alerts dont appear in list', async () => {
-      const a = await Alerta.create({ tipo: 'Otro', descripcion: 'Hidden from list test', sector: 'Test', autor: ciudadanoUser._id });
+      const a = await Alerta.create({ titulo: 'Hidden from list', tipo: 'Otro', descripcion: 'Hidden from list test', sector: 'Test', autor: ciudadanoUser._id });
       await request(app).delete(`/api/alertas/${a._id}`).set('Authorization', `Bearer ${adminToken}`);
 
       const res = await request(app)
@@ -349,7 +496,7 @@ describe('CiudadAlerta API', () => {
     });
 
     it('restores a soft deleted alert', async () => {
-      const a = await Alerta.create({ tipo: 'Otro', descripcion: 'Restore test alert here', sector: 'Test', autor: ciudadanoUser._id });
+      const a = await Alerta.create({ titulo: 'Restore test alert', tipo: 'Otro', descripcion: 'Restore test alert here', sector: 'Test', autor: ciudadanoUser._id });
       await request(app).delete(`/api/alertas/${a._id}`).set('Authorization', `Bearer ${adminToken}`);
 
       const res = await request(app)
@@ -366,7 +513,7 @@ describe('CiudadAlerta API', () => {
     let alertaForComments;
 
     beforeAll(async () => {
-      const a = await Alerta.create({ tipo: 'Seguridad', descripcion: 'Comment test alert here', sector: 'Test', autor: ciudadanoUser._id });
+      const a = await Alerta.create({ titulo: 'Comment test alert', tipo: 'Seguridad', descripcion: 'Comment test alert here', sector: 'Test', autor: ciudadanoUser._id });
       alertaForComments = a;
     });
 
@@ -397,12 +544,28 @@ describe('CiudadAlerta API', () => {
   });
 
   describe('GET /api/alertas/export', () => {
-    it('exports CSV', async () => {
+    it('exports CSV with correct content', async () => {
       const res = await request(app)
         .get('/api/alertas/export')
         .set('Authorization', `Bearer ${adminToken}`);
       expect(res.status).toBe(200);
       expect(res.headers['content-type']).toContain('text/csv');
+      const body = res.text;
+      expect(body).toContain('ID,Titulo,Tipo,Descripcion,Sector,Estado,Autor,Fecha,Lat,Lng');
+      expect(body).toContain('Robo en zona norte');
+    });
+
+    it('handles records with titulo correctly', async () => {
+      const res = await request(app)
+        .get('/api/alertas/export')
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(res.status).toBe(200);
+      const lines = res.text.trim().split('\n');
+      expect(lines.length).toBeGreaterThanOrEqual(2);
+      const dataLine = lines[1];
+      const tituloMatch = dataLine.match(/^([^,]+),"([^"]*)",/);
+      expect(tituloMatch).not.toBeNull();
+      expect(tituloMatch[2].length).toBeGreaterThanOrEqual(1);
     });
 
     it('rejects export without token', async () => {
@@ -425,6 +588,74 @@ describe('CiudadAlerta API', () => {
         .post('/api/auth/forgot-password')
         .send({ email: 'nobody@test.com' });
       expect(res.status).toBe(200);
+    });
+  });
+
+  describe('GET /api/auth/me', () => {
+    it('returns current user data', async () => {
+      const res = await request(app)
+        .get('/api/auth/me')
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.email).toBe('admin@test.com');
+      expect(res.body.rol).toBe('administrador');
+    });
+
+    it('rejects without token', async () => {
+      const res = await request(app).get('/api/auth/me');
+      expect(res.status).toBe(401);
+    });
+  });
+
+  describe('PUT /api/auth/me', () => {
+    it('updates nombre', async () => {
+      const res = await request(app)
+        .put('/api/auth/me')
+        .set('Authorization', `Bearer ${ciudadanoToken}`)
+        .send({ nombre: 'Ciudadano Actualizado' });
+      expect(res.status).toBe(200);
+      expect(res.body.nombre).toBe('Ciudadano Actualizado');
+    });
+
+    it('updates email', async () => {
+      const res = await request(app)
+        .put('/api/auth/me')
+        .set('Authorization', `Bearer ${ciudadanoToken}`)
+        .send({ email: 'ciudadano.nuevo@test.com' });
+      expect(res.status).toBe(200);
+      expect(res.body.email).toBe('ciudadano.nuevo@test.com');
+    });
+
+    it('rejects duplicate email', async () => {
+      const res = await request(app)
+        .put('/api/auth/me')
+        .set('Authorization', `Bearer ${ciudadanoToken}`)
+        .send({ email: 'admin@test.com' });
+      expect(res.status).toBe(409);
+    });
+
+    it('rejects empty update', async () => {
+      const res = await request(app)
+        .put('/api/auth/me')
+        .set('Authorization', `Bearer ${ciudadanoToken}`)
+        .send({});
+      expect(res.status).toBe(400);
+    });
+
+    it('rejects nombre shorter than 2 chars', async () => {
+      const res = await request(app)
+        .put('/api/auth/me')
+        .set('Authorization', `Bearer ${ciudadanoToken}`)
+        .send({ nombre: 'A' });
+      expect(res.status).toBe(400);
+    });
+
+    it('rejects nombre longer than 100 chars', async () => {
+      const res = await request(app)
+        .put('/api/auth/me')
+        .set('Authorization', `Bearer ${ciudadanoToken}`)
+        .send({ nombre: 'X'.repeat(101) });
+      expect(res.status).toBe(400);
     });
   });
 });

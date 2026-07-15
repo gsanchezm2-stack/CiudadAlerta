@@ -5,6 +5,10 @@ const TIPOS_VALIDOS = ['Seguridad', 'Infraestructura', 'Movilidad', 'Ambiental',
 const ESTADOS_VALIDOS = ['pendiente', 'en_revision', 'resuelto'];
 
 const crearAlerta = [
+  body('titulo')
+    .notEmpty().withMessage('Titulo es obligatorio')
+    .isLength({ min: 5, max: 100 }).withMessage('Titulo: minimo 5, maximo 100 caracteres')
+    .trim(),
   body('tipo')
     .notEmpty().withMessage('Tipo es obligatorio')
     .isIn(TIPOS_VALIDOS).withMessage(`Tipo invalido. Opciones: ${TIPOS_VALIDOS.join(', ')}`),

@@ -11,7 +11,7 @@ const pinoHttp = require('pino-http');
 const swaggerJsdoc = require('swagger-jsdoc');
 const swaggerUi = require('swagger-ui-express');
 
-const errorHandler = require('./middleware/errorHandler');
+const createErrorHandler = require('./middleware/errorHandler');
 const authRoutes = require('./routes/auth');
 const alertasRoutes = require('./routes/alertas');
 const comentariosRoutes = require('./routes/comentarios');
@@ -22,13 +22,13 @@ const log = pino({ level: process.env.LOG_LEVEL || 'info' });
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
-  console.error('JWT_SECRET no esta definido en .env');
+  log.fatal('JWT_SECRET no esta definido en .env');
   process.exit(1);
 }
 
 const MONGO_URI = process.env.MONGODB_URI || process.env.MONGO_URI;
 if (!MONGO_URI) {
-  console.error('MONGODB_URI no esta definido en .env');
+  log.fatal('MONGODB_URI no esta definido en .env');
   process.exit(1);
 }
 
@@ -169,45 +169,45 @@ app.use((req, res) => {
   });
 });
 
-app.use(errorHandler);
+app.use(createErrorHandler(log));
 
 async function iniciarServidor() {
   try {
     await mongoose.connect(MONGO_URI);
-    console.log('Conectado a MongoDB');
+    log.info('Conectado a MongoDB');
 
     const PORT = process.env.PORT || 5000;
     app.listen(PORT, '0.0.0.0', () => {
-      console.log(`Servidor corriendo en http://0.0.0.0:${PORT}`);
-      console.log(`Documentacion API en http://0.0.0.0:${PORT}/api/docs`);
+      log.info(`Servidor corriendo en http://0.0.0.0:${PORT}`);
+      log.info(`Documentacion API en http://0.0.0.0:${PORT}/api/docs`);
     });
   } catch (err) {
-    console.error('Error al iniciar servidor:', err);
+    log.error({ err: err.message }, 'Error al iniciar servidor');
     process.exit(1);
   }
 }
 
 mongoose.connection.on('disconnected', () => {
-  console.warn('MongoDB desconectado. Intentando reconectar en 5s...');
+  log.warn('MongoDB desconectado. Intentando reconectar en 5s...');
   setTimeout(() => {
     mongoose.connect(MONGO_URI).catch(err => {
-      console.error('Error al reconectar MongoDB:', err.message);
+      log.error({ err: err.message }, 'Error al reconectar MongoDB');
     });
   }, 5000);
 });
 
 mongoose.connection.on('error', (err) => {
-  console.error('Error de conexion MongoDB:', err.message);
+  log.error({ err: err.message }, 'Error de conexion MongoDB');
 });
 
 process.on('SIGTERM', async () => {
-  console.log('SIGTERM recibido. Cerrando servidor...');
+  log.info('SIGTERM recibido. Cerrando servidor...');
   await mongoose.connection.close();
   process.exit(0);
 });
 
 process.on('SIGINT', async () => {
-  console.log('SIGINT recibido. Cerrando servidor...');
+  log.info('SIGINT recibido. Cerrando servidor...');
   await mongoose.connection.close();
   process.exit(0);
 });

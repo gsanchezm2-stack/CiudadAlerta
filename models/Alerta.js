@@ -4,6 +4,7 @@ const TIPOS_ALERTA = ['Seguridad', 'Infraestructura', 'Movilidad', 'Ambiental', 
 const ESTADOS_ALERTA = ['pendiente', 'en_revision', 'resuelto'];
 
 const alertaSchema = new mongoose.Schema({
+  titulo: { type: String, required: true, trim: true, maxlength: 100, minlength: 5 },
   tipo: {
     type: String, required: true, enum: TIPOS_ALERTA,
     set: v => v.charAt(0).toUpperCase() + v.slice(1).toLowerCase()

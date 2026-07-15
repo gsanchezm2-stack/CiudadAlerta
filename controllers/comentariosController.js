@@ -52,7 +52,7 @@ exports.eliminar = async (req, res, next) => {
     }
 
     await Comentario.findByIdAndDelete(req.params.id);
-    res.json({ message: 'Comentario eliminado' });
+    res.json({ mensaje: 'Comentario eliminado' });
   } catch (error) {
     next(error);
   }

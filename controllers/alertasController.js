@@ -40,12 +40,13 @@ exports.exportar = async (req, res, next) => {
       .populate('autor', 'nombre email')
       .lean();
 
-    const header = 'ID,Tipo,Descripcion,Sector,Estado,Autor,Fecha,Lat,Lng\n';
+    const header = 'ID,Titulo,Tipo,Descripcion,Sector,Estado,Autor,Fecha,Lat,Lng\n';
     const rows = alertas.map(a => {
       const fecha = new Date(a.fecha).toISOString();
+      const titulo = `"${(a.titulo || '').replace(/"/g, '""')}"`;
       const desc = `"${(a.descripcion || '').replace(/"/g, '""')}"`;
       const autor = a.autor?.nombre || 'Anonimo';
-      return `${a._id},${a.tipo},${desc},${a.sector},${a.estado},${autor},${fecha},${a.lat || ''},${a.lng || ''}`;
+      return `${a._id},${titulo},${a.tipo},${desc},${a.sector},${a.estado},${autor},${fecha},${a.lat || ''},${a.lng || ''}`;
     }).join('\n');
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -63,7 +64,12 @@ exports.listar = async (req, res, next) => {
     if (sector) filtro.sector = { $regex: sector.trim(), $options: 'i' };
     if (tipo) filtro.tipo = { $regex: `^${tipo.trim()}$`, $options: 'i' };
     if (estado) filtro.estado = estado;
-    if (q) filtro.descripcion = { $regex: q.trim(), $options: 'i' };
+    if (q) {
+      filtro.$or = [
+        { titulo: { $regex: q.trim(), $options: 'i' } },
+        { descripcion: { $regex: q.trim(), $options: 'i' } }
+      ];
+    }
     if (fechaDesde || fechaHasta) {
       filtro.fecha = {};
       if (fechaDesde) filtro.fecha.$gte = new Date(fechaDesde);
@@ -126,7 +132,7 @@ exports.obtener = async (req, res, next) => {
 
 exports.crear = async (req, res, next) => {
   try {
-    const { tipo, descripcion, sector, lat, lng } = req.body;
+    const { titulo, tipo, descripcion, sector, lat, lng } = req.body;
 
     const tipoNormalizado = tipo.charAt(0).toUpperCase() + tipo.slice(1).toLowerCase();
 
@@ -135,7 +141,13 @@ exports.crear = async (req, res, next) => {
       nombre: f.originalname
     }));
 
+    const tituloLimpio = titulo.trim();
+    if (tituloLimpio.length > 100) {
+      return res.status(400).json({ error: 'Titulo: maximo 100 caracteres' });
+    }
+
     const doc = {
+      titulo: tituloLimpio,
       tipo: tipoNormalizado,
       descripcion: descripcion.trim().slice(0, 500),
       sector: sector.trim().slice(0, 80),
@@ -185,7 +197,7 @@ exports.eliminar = async (req, res, next) => {
     if (!resultado) {
       return res.status(404).json({ error: 'Alerta no encontrada' });
     }
-    res.json({ message: 'Alerta eliminada' });
+    res.json({ mensaje: 'Alerta eliminada' });
   } catch (error) {
     next(error);
   }

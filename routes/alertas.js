@@ -200,8 +200,13 @@ router.get('/:id', verificarToken, verificarPermiso('alertas:ver'), obtenerAlert
  *         multipart/form-data:
  *           schema:
  *             type: object
- *             required: [tipo, descripcion, sector]
+ *             required: [titulo, tipo, descripcion, sector]
  *             properties:
+ *               titulo:
+ *                 type: string
+ *                 minLength: 5
+ *                 maxLength: 100
+ *                 description: Titulo descriptivo de la alerta
  *               tipo:
  *                 type: string
  *                 enum: [Seguridad, Infraestructura, Movilidad, Ambiental, Salud, Educacion, Otro]

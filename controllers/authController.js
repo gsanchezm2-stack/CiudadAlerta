@@ -12,7 +12,7 @@ exports.registro = async (req, res, next) => {
     const emailNormalizado = email.toLowerCase().trim();
     const usuarioExiste = await Usuario.findOne({ email: emailNormalizado });
     if (usuarioExiste) {
-      return res.status(409).json({ mensaje: 'El email ya esta registrado' });
+      return res.status(409).json({ error: 'El email ya esta registrado' });
     }
 
     const passwordEncriptada = await bcrypt.hash(password, 12);
@@ -45,12 +45,12 @@ exports.login = async (req, res, next) => {
 
     const usuario = await Usuario.findOne({ email: email.toLowerCase().trim() });
     if (!usuario) {
-      return res.status(401).json({ mensaje: 'Credenciales invalidas' });
+      return res.status(401).json({ error: 'Credenciales invalidas' });
     }
 
     const passwordValida = await bcrypt.compare(password, usuario.password);
     if (!passwordValida) {
-      return res.status(401).json({ mensaje: 'Credenciales invalidas' });
+      return res.status(401).json({ error: 'Credenciales invalidas' });
     }
 
     const token = jwt.sign(
@@ -108,7 +108,7 @@ exports.resetPassword = async (req, res, next) => {
     });
 
     if (!usuario) {
-      return res.status(400).json({ mensaje: 'Token invalido o expirado' });
+      return res.status(400).json({ error: 'Token invalido o expirado' });
     }
 
     usuario.password = await bcrypt.hash(password, 12);
@@ -128,6 +128,42 @@ exports.me = async (req, res, next) => {
     if (!usuario) {
       return res.status(404).json({ error: 'Usuario no encontrado' });
     }
+    res.json(usuario);
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.updateMe = async (req, res, next) => {
+  try {
+    const { nombre, email } = req.body;
+    const updates = {};
+
+    if (nombre) {
+      const trimmed = nombre.trim();
+      if (trimmed.length < 2 || trimmed.length > 100) {
+        return res.status(400).json({ error: 'Nombre: minimo 2, maximo 100 caracteres' });
+      }
+      updates.nombre = trimmed;
+    }
+
+    if (email) {
+      const normalized = email.toLowerCase().trim();
+      const existing = await Usuario.findOne({ email: normalized, _id: { $ne: req.usuario.id } });
+      if (existing) {
+        return res.status(409).json({ error: 'El email ya esta en uso' });
+      }
+      updates.email = normalized;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: 'No hay campos para actualizar' });
+    }
+
+    const usuario = await Usuario.findByIdAndUpdate(req.usuario.id, updates, { new: true, runValidators: true })
+      .select('nombre email rol')
+      .lean();
+
     res.json(usuario);
   } catch (error) {
     next(error);
