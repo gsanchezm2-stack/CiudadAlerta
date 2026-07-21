@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Informe CiudadAlerta</title>
+<style>
+  body { font-family: 'Segoe UI', Arial, sans-serif; max-width: 900px; margin: 40px auto; padding: 0 20px; color: #2d4059; line-height: 1.6; }
+  h1 { color: #065A82; border-bottom: 3px solid #065A82; padding-bottom: 10px; }
+  h2 { color: #028090; margin-top: 32px; border-left: 4px solid #028090; padding-left: 12px; }
+  h3 { color: #043e5c; margin-top: 20px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }
+  th { background: #065A82; color: white; padding: 10px 14px; text-align: left; }
+  td { padding: 8px 14px; border-bottom: 1px solid #e0e0e0; }
+  tr:nth-child(even) { background: #f5f8fa; }
+  code { background: #e8eef6; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+  pre { background: #1a1d23; color: #e4e7ec; padding: 16px; border-radius: 8px; overflow-x: auto; font-size: 13px; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+  .badge-green { background: #dcfce7; color: #166534; }
+  .badge-blue { background: #dbeafe; color: #1e40af; }
+  .badge-yellow { background: #fef3c7; color: #92400e; }
+  .section { page-break-inside: avoid; }
+  @media print { body { margin: 20px; } h2 { page-break-after: avoid; } }
+</style>
+</head>
+<body>
+
+<h1>Informe Detallado - CiudadAlerta</h1>
+<p><strong>Fecha:</strong> 11 de julio de 2026 | <strong>Version:</strong> 1.0.0</p>
+
+<div class="section">
+<h2>1. Arquitectura del Sistema</h2>
+<table>
+  <tr><th>Capa</th><th>Tecnologia</th><th>Puerto</th></tr>
+  <tr><td>Backend</td><td>Express 5.2 + Mongoose 9.7</td><td>5000</td></tr>
+  <tr><td>Web</td><td>React 19 + React Router 7</td><td>3000</td></tr>
+  <tr><td>Movil</td><td>Expo SDK 54 + React Native 0.81</td><td>Expo Go</td></tr>
+  <tr><td>Base de datos</td><td>MongoDB Atlas</td><td>Cloud</td></tr>
+  <tr><td>Tests</td><td>Jest + Supertest + MongoDB Memory Server</td><td>-</td></tr>
+</table>
+</div>
+
+<div class="section">
+<h2>2. Backend Core</h2>
+
+<h3>2.1 Servidor Express (server.js)</h3>
+<ul>
+  <li>Express con middleware: helmet, compression, cors, rate-limit</li>
+  <li>JWT authentication (24h expiration)</li>
+  <li>Multer para uploads (5MB max, imagenes jpg/png/gif/webp)</li>
+  <li>Logging con pino + pino-http</li>
+  <li>Health check endpoint <code>GET /api/health</code></li>
+</ul>
+
+<h3>2.2 Modelos de Datos</h3>
+<ul>
+  <li><strong>Usuario:</strong> nombre, email, password (bcrypt 12 rounds), rol, resetToken</li>
+  <li><strong>Alerta:</strong> tipo (7 categorias), descripcion, sector, estado, autor, fecha, lat/lng, adjuntos[], eliminado</li>
+  <li><strong>Comentario:</strong> texto, autor, alerta, fecha</li>
+</ul>
+
+<h3>2.3 RBAC (Role-Based Access Control)</h3>
+<ul>
+  <li>Roles: ciudadano, autoridad, administrador</li>
+  <li>Permisos centralizados en <code>permisos.js</code> (3 copias identicas)</li>
+  <li>Middleware: verificarToken, verificarPermiso, verificarCambioEstado</li>
+  <li>Ciudadano solo puede marcar sus alertas como "resuelto"</li>
+  <li>Admin/autoridad pueden cambiar cualquier estado</li>
+</ul>
+</div>
+
+<div class="section">
+<h2>3. Endpoints API (18 rutas)</h2>
+<table>
+  <tr><th>Metodo</th><th>Ruta</th><th>Descripcion</th></tr>
+  <tr><td>POST</td><td>/api/auth/registro</td><td>Registrar usuario</td></tr>
+  <tr><td>POST</td><td>/api/auth/login</td><td>Iniciar sesion</td></tr>
+  <tr><td>POST</td><td>/api/auth/forgot-password</td><td>Solicitar reset</td></tr>
+  <tr><td>POST</td><td>/api/auth/reset-password</td><td>Cambiar contrasena</td></tr>
+  <tr><td>GET</td><td>/api/alertas</td><td>Listar (paginado, filtros)</td></tr>
+  <tr><td>GET</td><td>/api/alertas/stats</td><td>Estadisticas</td></tr>
+  <tr><td>GET</td><td>/api/alertas/export</td><td>Exportar CSV</td></tr>
+  <tr><td>GET</td><td>/api/alertas/:id</td><td>Detalle + comentarios</td></tr>
+  <tr><td>POST</td><td>/api/alertas</td><td>Crear alerta</td></tr>
+  <tr><td>PATCH</td><td>/api/alertas/:id/estado</td><td>Cambiar estado</td></tr>
+  <tr><td>DELETE</td><td>/api/alertas/:id</td><td>Soft delete</td></tr>
+  <tr><td>PATCH</td><td>/api/alertas/:id/restaurar</td><td>Restaurar</td></tr>
+  <tr><td>POST</td><td>/api/alertas/:id/comentarios</td><td>Crear comentario</td></tr>
+  <tr><td>GET</td><td>/api/alertas/:id/comentarios</td><td>Listar comentarios</td></tr>
+  <tr><td>DELETE</td><td>/api/comentarios/:id</td><td>Eliminar comentario</td></tr>
+  <tr><td>GET</td><td>/api/usuarios</td><td>Listar usuarios (admin)</td></tr>
+  <tr><td>PATCH</td><td>/api/usuarios/:id/rol</td><td>Cambiar rol (admin)</td></tr>
+  <tr><td>GET</td><td>/api/health</td><td>Health check</td></tr>
+</table>
+</div>
+
+<div class="section">
+<h2>4. Rate Limiting por Rol</h2>
+<table>
+  <tr><th>Rol</th><th>Limite</th></tr>
+  <tr><td>Global</td><td>100 requests / 15 minutos</td></tr>
+  <tr><td>Auth</td><td>10 intentos / 15 minutos</td></tr>
+  <tr><td>Ciudadano</td><td>10 alertas / hora</td></tr>
+  <tr><td>Autoridad</td><td>50 alertas / hora</td></tr>
+  <tr><td>Admin</td><td>200 alertas / hora</td></tr>
+</table>
+</div>
+
+<div class="section">
+<h2>5. Frontend Web</h2>
+
+<h3>5.1 Componentes React</h3>
+<table>
+  <tr><th>Componente</th><th>Funcion</th></tr>
+  <tr><td>AppLayout</td><td>Sidebar + top nav con logo</td></tr>
+  <tr><td>Dashboard</td><td>Estadisticas + graficos + exportar CSV</td></tr>
+  <tr><td>AlertasList</td><td>Lista paginada con busqueda y filtros</td></tr>
+  <tr><td>AlertaNew</td><td>Formulario con subir fotos</td></tr>
+  <tr><td>AlertaDetail</td><td>Detalle + fotos + comentarios + cambiar estado</td></tr>
+  <tr><td>MapaAlertas</td><td>Mapa Leaflet con marcadores</td></tr>
+  <tr><td>AdminPanel</td><td>Gestion de usuarios</td></tr>
+  <tr><td>Perfil</td><td>Info del usuario</td></tr>
+</table>
+
+<h3>5.2 Funcionalidades</h3>
+<ul>
+  <li>Login/Registro con validacion</li>
+  <li>Recuperar contrasena (forgot/reset)</li>
+  <li>Modo oscuro (toggle en nav)</li>
+  <li>Subir fotos (drag & drop, previews, max 3)</li>
+  <li>Comentarios en alertas</li>
+  <li>Exportar CSV desde dashboard</li>
+  <li>Paginacion con navegacion</li>
+  <li>Busqueda por texto, sector, tipo, estado</li>
+  <li>Filtros por fecha y distancia</li>
+  <li>Mapa interactivo con Leaflet</li>
+  <li>Graficos: Doughnut, Bar, Line (Chart.js)</li>
+  <li>Code splitting con React.lazy + Suspense</li>
+</ul>
+
+<h3>5.3 Estilos</h3>
+<ul>
+  <li>Neumorphism UI completo</li>
+  <li>CSS variables para dark mode</li>
+  <li>Responsive (mobile-first)</li>
+  <li>Animaciones modales (success popup)</li>
+  <li>Logo SVG custom (escudo + campana)</li>
+</ul>
+</div>
+
+<div class="section">
+<h2>6. App Movil (Expo)</h2>
+<h3>6.1 Pantallas</h3>
+<p>Login, Registro, Dashboard, Lista de alertas, Crear alerta, Detalle de alerta, Panel admin, Perfil</p>
+<h3>6.2 Funcionalidades</h3>
+<ul>
+  <li>Sesion persistente con expo-secure-store</li>
+  <li>API client con paginacion</li>
+  <li>RBAC local (permisos.js)</li>
+  <li>Navegacion basada en estado</li>
+  <li>Tunnel mode para cualquier red</li>
+</ul>
+</div>
+
+<div class="section">
+<h2>7. Testing (21 Tests)</h2>
+<table>
+  <tr><th>Grupo</th><th>Tests</th><th>Cobertura</th></tr>
+  <tr><td>Health</td><td>1</td><td>Endpoint de salud</td></tr>
+  <tr><td>Crear alertas</td><td>4</td><td>CRUD, validacion, geolocalizacion</td></tr>
+  <tr><td>Listar alertas</td><td>3</td><td>Paginacion, busqueda, filtros</td></tr>
+  <tr><td>Cambiar estado</td><td>3</td><td>Admin, ciudadano, permisos</td></tr>
+  <tr><td>Soft delete</td><td>3</td><td>Eliminar, ocultar, restaurar</td></tr>
+  <tr><td>Comentarios</td><td>3</td><td>Crear, validar, listar</td></tr>
+  <tr><td>Exportar CSV</td><td>2</td><td>Exportar, autenticacion</td></tr>
+  <tr><td>Forgot password</td><td>2</td><td>Solicitar reset, email inexistente</td></tr>
+</table>
+</div>
+
+<div class="section">
+<h2>8. Seguridad</h2>
+<ul>
+  <li>JWT tokens con expiration 24h</li>
+  <li>Bcrypt hash (12 rounds)</li>
+  <li>Rate limiting por endpoint y por rol</li>
+  <li>Helmet headers de seguridad</li>
+  <li>CORS configurado</li>
+  <li>Validacion de input en todos los endpoints</li>
+  <li>Soft delete (no borra datos)</li>
+  <li>Tokens de reset con expiracion 1 hora</li>
+</ul>
+</div>
+
+<div class="section">
+<h2>9. Rendimiento</h2>
+<ul>
+  <li><strong>Code splitting</strong> - React.lazy en todos los componentes</li>
+  <li><strong>useCallback/useMemo</strong> - AlertasList optimizado</li>
+  <li><strong>Compresion</strong> - gzip en respuestas HTTP</li>
+  <li><strong>Cache</strong> - Service worker para offline</li>
+  <li><strong>Index en MongoDB</strong> - 5 indices para busquedas rapidas</li>
+</ul>
+</div>
+
+<div class="section">
+<h2>10. Comandos de Ejecucion</h2>
+<pre>
+# Backend
+cd CiudadAlerta
+node server.js
+
+# Web
+cd ciudadalerta-app
+npm start
+
+# App movil (local)
+cd ciudadalerta-app
+npx expo start
+
+# App movil (cualquier red)
+cd ciudadalerta-app
+npx expo start --tunnel
+
+# Tests
+cd CiudadAlerta
+npm test
+
+# Build produccion
+cd ciudadalerta-web
+npm run build
+
+# Docs API
+http://localhost:5000/api/docs
+</pre>
+</div>
+
+<div class="section">
+<h2>11. Estructura de Archivos</h2>
+<pre>
+CiudadAlerta/
+  server.js              (532 lineas)
+  auth.js                (Autenticacion)
+  usuario.js             (Modelo)
+  permisos.js            (RBAC)
+  middleware/auth.js      (JWT middleware)
+  __tests__/api.test.js  (21 tests)
+
+ciudadalerta-web/
+  src/App.js             (Router)
+  src/App.css            (600+ lineas)
+  src/api.js             (API client)
+  src/components/        (8 componentes)
+
+ciudadalerta-app/
+  App.js                 (Navegacion)
+  src/api.js             (API client)
+  src/context/           (Auth)
+</pre>
+</div>
+
+<p style="text-align:center; color:#7a8ba8; margin-top:40px; font-size:12px;">
+  Informe generado automaticamente - CiudadAlerta v1.0.0 - 11 de julio de 2026
+</p>
+
+</body>
+</html>
